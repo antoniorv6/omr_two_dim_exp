@@ -4,4 +4,4 @@ env/
 venv/
 PriMuS-40000/
 __pycache__
-.DS_Store/
+.DS_Store
