@@ -6,3 +6,4 @@ PriMuS-40000/
 __pycache__
 .DS_Store
 Corpus/
+dataHandwritten/
