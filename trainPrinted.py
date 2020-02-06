@@ -39,6 +39,26 @@ def edit_distance(a, b):
 
     return current[n]
 
+def test_prediction(sequence, model, w2itarget, i2wtarget):
+    decoded = np.zeros((1,1,ALPHABETLENGTH))
+    decoded[0,0, w2i['<s>']] = 1.0
+    predicted = []
+    
+    for i in range(1, 500):
+        decoded_input = np.asarray(decoded)
+
+        prediction = model.predict([[sequence], decoded_input])
+        
+        decoded = np.append(decoded, np.zeros((1, 1, ALPHABETLENGTH)), axis=0)
+
+        predictedWord = np.argmax(prediction[0][-1])
+
+        if i2wtarget[predictedWord] == '</s>':
+            break
+        
+        predicted.append(i2wtarget[predictedWord])
+
+    return predicted
 
 def batch_confection(batchX, batchY):
     max_image_len = max([image.shape[1] for image in batchX])
@@ -57,7 +77,6 @@ def batch_confection(batchX, batchY):
 
     for i, sequence in enumerate(batchY):
         for j, char in enumerate(sequence):
-            decoder_input[i][j][w2i[char]] = 1.
             if j > 1:
                 decoder_output[i][j - 1][w2i[char]] = 1.
 
@@ -77,19 +96,25 @@ def batch_generator(X, Y, batch_size):
         index = (index + batch_size) % len(X)
 
 
-def prepareVocabularyandOutput(rawY):
+def prepareVocabularyandOutput(trainY, testY, valY):
     global ALPHABETLENGTH
     global w2i, i2w
 
     output_sos = '<s>'
     output_eos = '</s>'
 
-    Y = [[output_sos] + sequence + [output_eos] for sequence in rawY]
+    Y_train = [[output_sos] + sequence + [output_eos] for sequence in trainY]
+    Y_test = [[output_sos] + sequence + [output_eos] for sequence in testY]
+    Y_val = [[output_sos] + sequence + [output_eos] for sequence in valY]
 
     # Setting up the vocabulary with positions and symbols
     vocabulary = set()
 
-    for sequence in Y:
+    for sequence in Y_train:
+        vocabulary.update(sequence)
+    for sequence in Y_test:
+        vocabulary.update(sequence)
+    for sequence in Y_val:
         vocabulary.update(sequence)
 
     ALPHABETLENGTH = len(vocabulary)
@@ -99,7 +124,7 @@ def prepareVocabularyandOutput(rawY):
     w2i = dict([(char, i) for i, char in enumerate(vocabulary)])
     i2w = dict([(i, char) for i, char in enumerate(vocabulary)])
 
-    return Y
+    return Y_train, Y_test, Y_val
 
 
 def resize_image(image):
@@ -111,7 +136,7 @@ def loadData():
     X = []
     Y = []
 
-    samples = 40000
+    samples = 20000
 
     print('Loading data...')
     for i in tqdm.tqdm(range(1, samples + 1)):
@@ -124,14 +149,13 @@ def loadData():
     print('Data loaded!')
     return np.array(X), np.array(Y)
 
-def loadDataCP():
+def loadDataCP(filepath, samples):
     X = []
     Y = []
 
-    samples = 40000
     currentsamples = 0
 
-    with open("dataset.lst", "r") as datafile:
+    with open(filepath, "r") as datafile:
         line = datafile.readline()
         while line:
             files = line.split()
@@ -154,18 +178,11 @@ def loadDataCP():
     return np.array(X), np.array(Y)
 
 
-def TrainLoop(model_to_train, X, Y, val_split):
-
-    split_index = int(len(X) * val_split)
-    X_train = X[split_index:]
-    Y_train = Y[split_index:]
-
-    X_validation = X[:split_index]
-    Y_validation = Y[:split_index]
+def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test):
 
     generator = batch_generator(X_train, Y_train, BATCH_SIZE)
 
-    X_Val, Y_Val, T_validation = batch_confection(X_validation, Y_validation)
+    X_Test, Y_Test, T_Test = batch_confection(X_test, Y_test)
 
     for epoch in range(30):
         print()
@@ -174,15 +191,14 @@ def TrainLoop(model_to_train, X, Y, val_split):
         history = model_to_train.fit_generator(generator,
                                       steps_per_epoch=len(X_train) // BATCH_SIZE,
                                       verbose=2,
-                                      epochs=EVAL_EPOCH_STRIDE,
-                                      validation_data=[[X_Val, Y_Val], T_validation])
+                                      epochs=EVAL_EPOCH_STRIDE)
 
         current_val_ed = 0
-        batch_prediction = model_to_train.predict([X_Val, Y_Val], batch_size=BATCH_SIZE)
+        batch_prediction = model_to_train.predict([X_Test, Y_Test], batch_size=BATCH_SIZE)
 
         for i, prediction in enumerate(batch_prediction):
             raw_sequence = [i2w[char] for char in np.argmax(prediction, axis=1)]
-            raw_gt_sequence = [i2w[char] for char in np.argmax(T_validation[i], axis=1)]
+            raw_gt_sequence = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
 
             sequence = []
             gt = []
@@ -198,31 +214,70 @@ def TrainLoop(model_to_train, X, Y, val_split):
 
             current_val_ed += edit_distance(gt, sequence) / len(gt)
 
-        current_val_ed = (100. * current_val_ed) / len(X_validation)
+        current_val_ed = (100. * current_val_ed) / len(X_Test)
+        
+        nolookValEdition = 0
+
+        for i, sequence in enumerate(X_Test):
+            prediction = test_prediction(sequence, model_to_train, w2i, i2w)
+            raw_gt = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
+
+            gt = []
+            for char in raw_gt:
+                gt += [char]
+                if char == '</s>':
+                    break
+            
+            nolookValEdition += edit_distance(gt, prediction) / len(gt)
+        
+        valNoLookEdition = (100. * nolookValEdition) / len(X_Test)
+        
         print()
         print()
-        print('Epoch ' + str(((epoch + 1) * EVAL_EPOCH_STRIDE) - 1) + ' - SER avg validation: ' + str(current_val_ed))
+        print('Epoch ' + str(((epoch + 1) * EVAL_EPOCH_STRIDE) - 1) + ' - SER avg test with input: ' + str(current_val_ed))
+        print('Epoch ' + str(((epoch + 1) * EVAL_EPOCH_STRIDE) - 1) + ' - SER avg test without input: ' + str(valNoLookEdition))
         print()
         print()
 
 
 if __name__ == "__main__":
 
-    RawX, RawY = loadDataCP()
+    print("Loading training data...")
+    TrainX, TrainY = loadDataCP("./CameraPrimusFolds/Fold1/train", 30000)
+    print("Loading testing data...")
+    TestX, TestY = loadDataCP("./CameraPrimusFolds/Fold1/test", 5000)
+    print("Loading validation data...")
+    ValidX, ValidY = loadDataCP("./CameraPrimusFolds/Fold1/validation", 5000)
 
-    for index, rimg in enumerate(RawX):
-        RawX[index] = resize_image(rimg)
+    for index, rimg in enumerate(TrainX):
+        TrainX[index] = resize_image(rimg)
+    for index, rimg in enumerate(TestX):
+        TestX[index] = resize_image(rimg)
+    for index, rimg in enumerate(ValidX):
+        ValidX[index] = resize_image(rimg)
 
-    print(RawX.shape)
-    print(RawY.shape)
+    print("//// - TRAINING DATA - ////")
+    print(TrainX.shape)
+    print(TrainY.shape)
+    print("///////////////////////////")
+    print()
+    print("//// - TESTING DATA - ////")
+    print(TestX.shape)
+    print(TestY.shape)
+    print("///////////////////////////")
+    print()
+    print("//// - VALIDATION DATA - ////")
+    print(ValidX.shape)
+    print(ValidY.shape)
+    print("///////////////////////////")
 
-    RawY = prepareVocabularyandOutput(RawY)
+    Y_Train, Y_Test, Y_Validate = prepareVocabularyandOutput(TrainY, TestY, ValidY)
 
     print("Vocabulary size: " + str(ALPHABETLENGTH))
 
     model = CreateS2SModel(FEATURESPERFRAME, ALPHABETLENGTH)
 
-    TrainLoop(model, RawX, RawY, 0.01)
+    TrainLoop(model, TrainX, TrainY, TestX, TestY)
 
 
 

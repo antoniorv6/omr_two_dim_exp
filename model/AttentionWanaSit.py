@@ -5,12 +5,17 @@ from keras.models import Model
 from keras import backend as K
 import numpy as np
 
+from keras.backend.tensorflow_backend import set_session
+import tensorflow as tf
+
 def CreateAttentionModelWS(FEATURESPERFRAME, ALPHABETLENGTH):
+
+    init_session()
 
     filters = [16, 64, 128, 128]
     w_poolings = [2, 2, 2, 2]
     h_poolings = [2, 2, 2, 2]
-    rnn_neurons = 128
+    rnn_neurons = 256
 
     if K.image_data_format() == 'channels_last':
         input_data = Input(name='input', shape=(FEATURESPERFRAME, None, 1))
@@ -131,3 +136,10 @@ def CreateAttentionModelWSHW(FEATURESPERFRAME, ALPHABETLENGTH):
     model.summary()
 
     return model
+
+
+def init_session():
+    conf = tf.ConfigProto()
+    conf.gpu_options.allow_growth= True
+    sess = tf.Session(config=conf)
+    set_session(sess)

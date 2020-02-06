@@ -16,7 +16,7 @@ def putInList(imagename, ispng):
         finalList.write("%s\t%s\n" % (imagepath, agnosticpath))
 
 
-copyDirectory = "../CameraPrimus"
+copyDirectory = "CameraPrimus"
 agnosticname = ""
 imagepath = ""
 
