@@ -7,8 +7,6 @@ import os
 import tqdm
 import sys
 
-import tqdm
-
 from keras.models import load_model
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
@@ -94,6 +92,13 @@ def batch_generator(X, Y, batch_size):
         index = (index + batch_size) % len(X)
 
 
+def parseSequence(sequence):
+    
+    parsed = []
+    for char in sequence:
+        parsed += char.split("-")
+    return parsed
+
 def prepareVocabularyandOutput(trainY, testY, valY):
     global ALPHABETLENGTH
     global w2i, i2w
@@ -101,9 +106,9 @@ def prepareVocabularyandOutput(trainY, testY, valY):
     output_sos = '<s>'
     output_eos = '</s>'
 
-    Y_train = [[output_sos] + sequence + [output_eos] for sequence in trainY]
-    Y_test = [[output_sos] + sequence + [output_eos] for sequence in testY]
-    Y_val = [[output_sos] + sequence + [output_eos] for sequence in valY]
+    Y_train = [[output_sos] + parseSequence(sequence) + [output_eos] for sequence in trainY]
+    Y_test = [[output_sos] + parseSequence(sequence) + [output_eos] for sequence in testY]
+    Y_val = [[output_sos] + parseSequence(sequence) + [output_eos] for sequence in valY]
 
     # Setting up the vocabulary with positions and symbols
     vocabulary = set()
@@ -179,13 +184,14 @@ def loadDataCP(filepath, samples):
     return np.array(X), np.array(Y)
 
 def saveCheckpoint(modelToSave, fold, SER):
-    modelToSave.save("checkpoints/FOLD" + str(fold) + "/model.h5")
+    modelToSave.save("checkpoints/FOLD" + str(fold) + "/checkpoint" + str(SER))
 
 
 def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD):
 
     generator = batch_generator(X_train, Y_train, BATCH_SIZE)
-    generatorTest = batch_generator(X_test, Y_test, BATCH_SIZE)
+
+    X_Test, Y_Test, T_Test = batch_confection(X_test, Y_test)
 
     best_value_eval = 190
 
@@ -199,50 +205,46 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD):
                                       epochs=EVAL_EPOCH_STRIDE)
 
         current_val_ed = 0
-        
-        for step in range(len(X_test)//BATCH_SIZE):
-            TestInputs, T_Test = next(generatorTest)
-            batch_prediction = model_to_train.predict(TestInputs, batch_size=BATCH_SIZE)
-            for i, prediction in enumerate(batch_prediction):
-                raw_sequence = [i2w[char] for char in np.argmax(prediction, axis=1)]
-                raw_gt_sequence = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
+        batch_prediction = model_to_train.predict([X_Test, Y_Test], batch_size=BATCH_SIZE)
 
-                sequence = []
-                gt = []
+        for i, prediction in enumerate(batch_prediction):
+            raw_sequence = [i2w[char] for char in np.argmax(prediction, axis=1)]
+            raw_gt_sequence = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
 
-                for char in raw_sequence:
-                    sequence += [char]
-                    if char == '</s>':
-                        break
-                for char in raw_gt_sequence:
-                    gt += [char]
-                    if char == '</s>':
-                        break
+            sequence = []
+            gt = []
 
-                current_val_ed += edit_distance(gt, sequence) / len(gt)
+            for char in raw_sequence:
+                sequence += [char]
+                if char == '</s>':
+                    break
+            for char in raw_gt_sequence:
+                gt += [char]
+                if char == '</s>':
+                    break
 
-        current_val_ed = (100. * current_val_ed) / len(X_test)
+            current_val_ed += edit_distance(gt, sequence) / len(gt)
+
+        current_val_ed = (100. * current_val_ed) / len(X_Test)
         
         nolookValEdition = 0
 
         print("Evaluating models...")
-        for step in tqdm.tqdm(range(len(X_test)//BATCH_SIZE)):
-            TestInputs, T_Test = next(generatorTest)
-            batch_prediction = model_to_train.predict(TestInputs, batch_size=BATCH_SIZE)
-            for i, sequence in enumerate(TestInputs[0]):
-                prediction = test_prediction(sequence, model_to_train, w2i, i2w)
-                raw_gt = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
+        for i, sequence in enumerate(X_Test):
+            prediction = test_prediction(sequence, model_to_train, w2i, i2w)
+            #print("Prediction done")
+            raw_gt = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
 
-                gt = []
-                for char in raw_gt:
-                    gt += [char]
-                    if char == '</s>':
-                        break
+            gt = []
+            for char in raw_gt:
+                gt += [char]
+                if char == '</s>':
+                    break
             
-                nolookValEdition += edit_distance(gt, prediction) / len(gt)
+            nolookValEdition += edit_distance(gt, prediction) / len(gt)
 
         print("Finished evaluation, displaying results") 
-        valNoLookEdition = (100. * nolookValEdition) / len(X_test)
+        valNoLookEdition = (100. * nolookValEdition) / len(X_Test)
         
         print()
         print('Epoch ' + str(((epoch + 1) * EVAL_EPOCH_STRIDE) - 1) + ' - SER avg test with input: ' + str(current_val_ed))
@@ -263,7 +265,7 @@ if __name__ == "__main__":
         fold = i+1
         print("WORKING ON FOLD " + str(fold))
         print("Loading training data...")
-        TrainX, TrainY = loadDataCP("./CameraPrimusFolds/Fold"+ str(fold) +"/train", 30000)
+        TrainX, TrainY = loadDataCP("./CameraPrimusFolds/Fold"+ str(fold) +"/train", 20000)
         print("Loading testing data...")
         TestX, TestY = loadDataCP("./CameraPrimusFolds/Fold"+ str(fold) +"/test", 10000)
         print("Loading validation data...")
@@ -286,6 +288,7 @@ if __name__ == "__main__":
         print("//// - TESTING DATA - ////")
         print(TestX.shape)
         print(TestY.shape)
+        print(TestY)
         print("///////////////////////////")
         print()
         print("//// - VALIDATION DATA - ////")
@@ -301,36 +304,32 @@ if __name__ == "__main__":
 
         bestvalue = TrainLoop(model, TrainX, Y_Train, TestX, Y_Test, fold)
 
-        modelToTest = load_model("checkpoints/FOLD" + str(fold) + "/model.h5")
+        modelToTest = load_model("checkpoints/FOLD" + str(fold) + "/checkpoint/model.mk5")
 
         print("TESTING MODEL ...")
 
-        generatorValidation = batch_generator(ValidX, ValidY, BATCH_SIZE)
-        #X_Validation, Y_Validation, T_Validation = batch_confection(ValidX, ValidY)
+        X_Validation, Y_Validation, T_Validation = batch_confection(ValidX, ValidY)
+        
         validationEdition = 0
-        for step in tqdm.tqdm(range(len(ValidX)//BATCH_SIZE)):
-            ValidInputs, T_Validation = next(generatorValidation)
-            batch_prediction = modelToTest.predict(ValidInputs, batch_size=BATCH_SIZE)
-            for i, sequence in enumerate(ValidInputs[0]):
-                prediction = test_prediction(sequence, modelToTest, w2i, i2w)
-                raw_gt = [i2w[char] for char in np.argmax(T_Validation[i], axis=1)]
+        for i, sequence in enumerate(X_Validation):
+            prediction = test_prediction(sequence, modelToTest, w2i, i2w)
+            #print("Prediction done")
+            raw_gt = [i2w[char] for char in np.argmax(T_Validation[i], axis=1)]
 
-                gt = []
-                for char in raw_gt:
-                    gt += [char]
-                    if char == '</s>':
-                        break
+            gt = []
+            for char in raw_gt:
+                gt += [char]
+                if char == '</s>':
+                    break
             
-                validationEdition += edit_distance(gt, prediction) / len(gt)
+            validationEdition += edit_distance(gt, prediction) / len(gt)
 
         print("Finished evaluation, displaying results") 
-        displayResult = (100. * validationEdition) / len(ValidX)
+        displayResult = (100. * validationEdition) / len(X_Validation)
         
-        file = open("checkpoints/FOLD" + str(fold) + "/resume.txt", "w+")
-        file.write("MODEL RESULTS IN FOLD " + str(fold))
-        file.write("TRAINING BEST SER - " + str(bestvalue))
-        file.write("SER WITH TEST DATA - " + str(displayResult))
-        file.close()
+        print()
+        print('SER in final validation: ' + str(displayResult))
+        print()
 
 
 
