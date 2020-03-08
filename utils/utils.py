@@ -46,6 +46,19 @@ def edit_distance(a, b):
 
     return current[n]
 
+def make_single_prediction(sequence, model, w2itarget, i2wtarget):
+    decoded = np.zeros((1,500,ALPHABETLENGTH), dtype=np.float)
+    decoded_input = np.asarray(decoded)
+    prediction = model.predict([[sequence], decoded_input])
+    predicted_sequence = [i2w[char] for char in np.argmax(prediction[0], axis=1)]
+    predicted = []
+    
+    for char in predicted_sequence:
+        predicted += [char]
+        if char == '</s>':
+            break
+
+    return predicted
 
 def prepareOutput1(trainY, testY, valY, i2w, w2i, manuscript):
 

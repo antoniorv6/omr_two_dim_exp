@@ -66,6 +66,10 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w):
 
     best_value_eval = 190
 
+    print(w2i)
+    print(i2w)
+    sys.exit(0)
+
     for epoch in range(30):
         print()
         print('----> Epoch', epoch * EVAL_EPOCH_STRIDE)
