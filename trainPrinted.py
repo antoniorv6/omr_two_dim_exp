@@ -1,6 +1,6 @@
 from model.AttentionWanaSit import CreateAttentionModelWS
 from model.S2S import CreateS2SModel
-from utils.utils import edit_distance, make_single_prediction, LoadCameraPrimus, prepareOutput1, resize_image
+from utils.utils import edit_distance, make_single_prediction, LoadCameraPrimus, prepareOutput1, resize_image, saveCheckpointKeras, parseSequence
 
 import cv2
 import numpy as np
@@ -16,7 +16,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 FOLDERPATH = 'CameraPrimus/'
 FEATURESPERFRAME = 128
 ALPHABETLENGTH = 0
-BATCH_SIZE = 16
+BATCH_SIZE = 8
 EVAL_EPOCH_STRIDE = 2
 ################    
 
@@ -55,20 +55,13 @@ def batch_generator(X, Y, batch_size):
 
         index = (index + batch_size) % len(X)
 
-def saveCheckpoint(modelToSave, fold, SER):
-    modelToSave.save("checkpoints/FOLD" + str(fold) + "/model.h5")
 
-
-def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w):
+def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w, ALPHABETLENGTH):
 
     generator = batch_generator(X_train, Y_train, BATCH_SIZE)
     generatorTest = batch_generator(X_test, Y_test, BATCH_SIZE)
 
     best_value_eval = 190
-
-    print(w2i)
-    print(i2w)
-    sys.exit(0)
 
     for epoch in range(30):
         print()
@@ -99,6 +92,9 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w):
                     gt += [char]
                     if char == '</s>':
                         break
+                
+                sequence = parseSequence(sequence)
+                gt = parseSequence(gt)
 
                 current_val_ed += edit_distance(gt, sequence) / len(gt)
 
@@ -106,11 +102,10 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w):
         
         nolookValEdition = 0
 
-        print("Evaluating models...")
         for step in tqdm.tqdm(range(len(X_test)//BATCH_SIZE)):
             TestInputs, T_Test = next(generatorTest)
             for i, sequence in enumerate(TestInputs[0]):
-                prediction = make_single_prediction(sequence, model_to_train, w2i, i2w)
+                prediction = make_single_prediction(sequence, model_to_train, i2w, ALPHABETLENGTH)
                 raw_gt = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
 
                 gt = []
@@ -118,10 +113,12 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w):
                     gt += [char]
                     if char == '</s>':
                         break
-            
+                
+                prediction = parseSequence(prediction)
+                gt = parseSequence(gt)
+                
                 nolookValEdition += edit_distance(gt, prediction) / len(gt)
 
-        print("Finished evaluation, displaying results") 
         valNoLookEdition = (100. * nolookValEdition) / len(X_test)
         
         print()
@@ -131,22 +128,22 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w):
 
         if valNoLookEdition < best_value_eval:
             print("Saving best result")
-            saveCheckpoint(model_to_train, FOLD, valNoLookEdition)
+            saveCheckpointKeras(model_to_train, "checkpoints/Printed/S2SA/", 0, fold)
             best_value_eval = valNoLookEdition
     
     return best_value_eval
 
 if __name__ == "__main__":
 
-    for i in range(1):
-        fold = i+1
+    for i in range(5):
+        fold = i + 1
         print("WORKING ON FOLD " + str(fold))
         print("Loading training data...")
-        TrainX, TrainY = LoadCameraPrimus("./CameraPrimusFolds/Fold"+ str(fold) +"/train", 100)
+        TrainX, TrainY = LoadCameraPrimus("./CameraPrimusFolds/Fold"+ str(fold) +"/train", 30000)
         print("Loading testing data...")
-        TestX, TestY = LoadCameraPrimus("./CameraPrimusFolds/Fold"+ str(fold) +"/test", 100)
+        TestX, TestY = LoadCameraPrimus("./CameraPrimusFolds/Fold"+ str(fold) +"/test", 10000)
         print("Loading validation data...")
-        ValidX, ValidY = LoadCameraPrimus("./CameraPrimusFolds/Fold"+ str(fold) +"/validation", 100)
+        ValidX, ValidY = LoadCameraPrimus("./CameraPrimusFolds/Fold"+ str(fold) +"/validation", 10000)
 
         for index, rimg in enumerate(TrainX):
             TrainX[index] = resize_image(rimg, FEATURESPERFRAME)
@@ -175,16 +172,15 @@ if __name__ == "__main__":
         w2i = {}
         i2w = {}
 
-        Y_Train, Y_Test, Y_Validate, w2i, i2w, ALPHABETLENGTH = prepareOutput1(TrainY, TestY, ValidY, i2w, w2i, "Printed")
+        Y_Train, Y_Test, Y_Validate, w2i, i2w, ALPHABETLENGTH = prepareOutput1(TrainY, TestY, ValidY, i2w, w2i, "Printed", fold)
 
         print("Vocabulary size: " + str(ALPHABETLENGTH))
-        print("Saving vocabulary...")
 
         model = CreateAttentionModelWS(FEATURESPERFRAME, ALPHABETLENGTH)
 
-        bestvalue = TrainLoop(model, TrainX, Y_Train, TestX, Y_Test, fold, w2i, i2w)
-
-        modelToTest = load_model("checkpoints/FOLD" + str(fold) + "/model.h5")
+        bestvalue = TrainLoop(model, TrainX, Y_Train, TestX, Y_Test, fold, w2i, i2w, ALPHABETLENGTH)
+        
+        modelToTest = load_model("checkpoints/Printed/S2SA/modelc0fold"+str(fold)+".h5")
 
         print("TESTING MODEL ...")
 
@@ -203,10 +199,12 @@ if __name__ == "__main__":
                     gt += [char]
                     if char == '</s>':
                         break
-            
+                
+                prediction = parseSequence(prediction)
+                gt = parseSequence(gt)
+
                 validationEdition += edit_distance(gt, prediction) / len(gt)
 
-        print("Finished evaluation, displaying results") 
         displayResult = (100. * validationEdition) / len(ValidX)
         
         print("FOLD " + str(fold) + " SER: " + str(displayResult))

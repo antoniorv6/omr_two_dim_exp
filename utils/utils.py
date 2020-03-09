@@ -1,3 +1,6 @@
+import cv2
+import numpy as np
+
 ##Loads Camera Primus Dataset from a fold
 def LoadCameraPrimus(filepath, samples):
     X = []
@@ -46,11 +49,11 @@ def edit_distance(a, b):
 
     return current[n]
 
-def make_single_prediction(sequence, model, w2itarget, i2wtarget):
+def make_single_prediction(sequence, model, i2wtarget, ALPHABETLENGTH):
     decoded = np.zeros((1,500,ALPHABETLENGTH), dtype=np.float)
     decoded_input = np.asarray(decoded)
     prediction = model.predict([[sequence], decoded_input])
-    predicted_sequence = [i2w[char] for char in np.argmax(prediction[0], axis=1)]
+    predicted_sequence = [i2wtarget[char] for char in np.argmax(prediction[0], axis=1)]
     predicted = []
     
     for char in predicted_sequence:
@@ -60,7 +63,7 @@ def make_single_prediction(sequence, model, w2itarget, i2wtarget):
 
     return predicted
 
-def prepareOutput1(trainY, testY, valY, i2w, w2i, manuscript):
+def prepareOutput1(trainY, testY, valY, i2w, w2i, manuscript, fold):
 
     output_sos = '<s>'
     output_eos = '</s>'
@@ -71,11 +74,11 @@ def prepareOutput1(trainY, testY, valY, i2w, w2i, manuscript):
 
     # Setting up the vocabulary with positions and symbols
 
-    w2i, i2w, LENGTH = confectVocabulary(Y_train, Y_test, Y_val, w2i, i2w, manuscript, 1)
+    w2i, i2w, LENGTH = confectVocabulary(Y_train, Y_test, Y_val, w2i, i2w, manuscript, 1, fold)
 
     return Y_train, Y_test, Y_val, w2i, i2w, LENGTH
 
-def prepareOutput3(trainY, testY, valY, i2w, w2i, manuscript):
+def prepareOutput3(trainY, testY, valY, i2w, w2i, manuscript, fold):
 
     output_sos = '<s>'
     output_eos = '</s>'
@@ -86,11 +89,11 @@ def prepareOutput3(trainY, testY, valY, i2w, w2i, manuscript):
 
     # Setting up the vocabulary with positions and symbols
 
-    w2i, i2w, LENGTH = confectVocabulary(Y_train, Y_test, Y_val, w2i, i2w, manuscript, 3)
+    w2i, i2w, LENGTH = confectVocabulary(Y_train, Y_test, Y_val, w2i, i2w, manuscript, 3, fold)
 
     return Y_train, Y_test, Y_val, w2i, i2w, LENGTH
 
-def confectVocabulary(YT, YTest, YVal, w2i, i2w, manuscript, type_voc):
+def confectVocabulary(YT, YTest, YVal, w2i, i2w, manuscript, type_voc, fold):
     
     vocabulary = set()
 
@@ -103,18 +106,22 @@ def confectVocabulary(YT, YTest, YVal, w2i, i2w, manuscript, type_voc):
 
     ALPHABETLENGTH = len(vocabulary) + 1
 
+    w2i = {}
+    i2w = {}
+
     w2i = dict([(char, i+1) for i, char in enumerate(vocabulary)])
     i2w = dict([(i+1, char) for i, char in enumerate(vocabulary)])
 
     w2i['PAD'] = 0
     i2w[0] = 'PAD'
 
-    np.save("vocabulary/" + manuscript + "/w2i" + str(type_voc) + ".npy", w2i)
-    np.save("vocabulary/"+ manuscript + "/i2w"  + str(type_voc) + ".npy", i2w)
-
+    print("Saving vocabulary...")
+    np.save("vocabulary/" + manuscript + "/w2i" + str(type_voc) + str(fold) + ".npy", w2i)
+    np.save("vocabulary/"+ manuscript + "/i2w"  + str(type_voc) + str(fold) + ".npy", i2w)
+    
     return w2i, i2w, ALPHABETLENGTH
 
-def resize_image(FEATURESPERFRAME, image):
+def resize_image(image, FEATURESPERFRAME):
     resize_width = int(float(FEATURESPERFRAME * image.shape[1]) / image.shape[0])
     return cv2.resize(image, (resize_width, FEATURESPERFRAME))
 
@@ -123,3 +130,6 @@ def parseSequence(sequence):
     for char in sequence:
         parsed += char.split("-")
     return parsed
+
+def saveCheckpointKeras(modelToSave, path, codification, fold):
+    modelToSave.save(path + "modelc" + str(codification) + "fold" + str(fold)+ ".h5")
