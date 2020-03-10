@@ -76,7 +76,7 @@ def TrainLoop(model_to_train, X_train, Y_train, X_test, Y_test, FOLD, w2i, i2w, 
         
         for step in range(len(X_test)//BATCH_SIZE):
             TestInputs, T_Test = next(generatorTest)
-            # batch_prediction = model_to_train.predict(TestInputs, batch_size=BATCH_SIZE)
+            batch_prediction = model_to_train.predict(TestInputs, batch_size=BATCH_SIZE)
             for i, prediction in enumerate(batch_prediction):
                 raw_sequence = [i2w[char] for char in np.argmax(prediction, axis=1)]
                 raw_gt_sequence = [i2w[char] for char in np.argmax(T_Test[i], axis=1)]
@@ -191,7 +191,7 @@ if __name__ == "__main__":
             ValidInputs, T_Validation = next(generatorValidation)
             batch_prediction = modelToTest.predict(ValidInputs, batch_size=BATCH_SIZE)
             for i, sequence in enumerate(ValidInputs[0]):
-                prediction = make_single_prediction(sequence, modelToTest, w2i, i2w)
+                prediction = make_single_prediction(sequence, modelToTest, i2w, ALPHABETLENGTH)
                 raw_gt = [i2w[char] for char in np.argmax(T_Validation[i], axis=1)]
 
                 gt = []

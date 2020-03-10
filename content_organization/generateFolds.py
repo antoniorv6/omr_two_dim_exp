@@ -46,9 +46,9 @@ if __name__ == '__main__':
         except FileExistsError:
             pass
 
-        vector_to_file(directory + "/train", data[:val_start])  # Train dataset
-        vector_to_file(directory + "/validation", data[val_start:val_end])  # Validation train dataset
-        vector_to_file(directory + "/test", data[val_end:])  # Test dataset
+        vector_to_file(directory + "/train", shuffledData[:val_start])  # Train dataset
+        vector_to_file(directory + "/validation", shuffledData[val_start:val_end])  # Validation train dataset
+        vector_to_file(directory + "/test", shuffledData[val_end:])  # Test dataset
 
 
 
