@@ -8,6 +8,8 @@ import numpy as np
 import cv2
 import os
 
+from utils.utils import parseSequence, LoadCameraPrimus, prepareOutput1
+
 # ===================================================
 os.environ["CUDA_VISIBLE_DEVICES"]="1"
 config = tf.ConfigProto()
@@ -112,70 +114,6 @@ def edit_distance(a,b,EOS=-1,PAD=-1):
 
     return levenshtein(_a,_b)
 
-
-def loadDataCP(filepath, samples):
-    X = []
-    Y = []
-
-    currentsamples = 0
-
-    with open(filepath, "r") as datafile:
-        line = datafile.readline()
-        while line:
-            files = line.split()
-
-            image = cv2.imread(files[0], False)
-            sequenceFile = open(files[1], "r")
-
-            X.append(image)
-            Y.append(sequenceFile.readline().split())
-
-            sequenceFile.close()
-            line = datafile.readline()
-
-            currentsamples += 1
-
-            if currentsamples == samples:
-                datafile.close()
-                break
-
-    return np.array(X), np.array(Y)
-
-def prepareVocabularyandOutput(trainY, testY, valY):
-    global ALPHABETLENGTH
-    global w2i, i2w
-
-    output_sos = '<s>'
-    output_eos = '</s>'
-
-    Y_train = [[output_sos] + sequence + [output_eos] for sequence in trainY]
-    Y_test = [[output_sos] + sequence + [output_eos] for sequence in testY]
-    Y_val = [[output_sos] + sequence + [output_eos] for sequence in valY]
-
-    # Setting up the vocabulary with positions and symbols
-    vocabulary = set()
-
-    for sequence in Y_train:
-        vocabulary.update(sequence)
-    for sequence in Y_test:
-        vocabulary.update(sequence)
-    for sequence in Y_val:
-        vocabulary.update(sequence)
-
-    ALPHABETLENGTH = len(vocabulary) + 1
-
-    # print('We have a total of ' + str(len(vocabulary)) + ' symbols')
-
-    w2i = dict([(char, i+1) for i, char in enumerate(vocabulary)])
-    i2w = dict([(i+1, char) for i, char in enumerate(vocabulary)])
-
-    w2i['PAD'] = 0
-    i2w[0] = 'PAD'
-
-    return Y_train, Y_test, Y_val
-
-
-# ===================================================
 
 def leaky_relu(features, alpha=0.2, name=None):
   with ops.name_scope(name, "LeakyRelu", [features, alpha]):
@@ -299,10 +237,6 @@ def crnn(params):
             'keep_prob': rnn_keep_prob}
 
 
-def save_vocabulary(filepath, vocabulary):
-    np.save(filepath,vocabulary)
-
-
 def data_preparation(X, Y, w2i, params):
     height = params['img_height']
 
@@ -330,18 +264,20 @@ def data_preparation(X, Y, w2i, params):
 if __name__ == "__main__":
 
     # ========
-    max_epochs = 30
+    max_epochs = 100
     mini_batch_size = 16
     val_split = 0.1
     fixed_height = 64
     fold = 1
     # ========
 
-    #parser = argparse.ArgumentParser(description='CRNN Training for HMR.')
-    #parser.add_argument('-data_list', dest='data', type=str, required=True, help='Path to data list.')
-    #parser.add_argument('-save_model', dest='save_model', type=str, default=None, help='Path to saved model.')
-    #parser.add_argument('-vocabulary', dest='vocabulary', type=str, required=True, help='Path to export the vocabulary.')
-    #args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='CRNN Training for HMR.')
+    parser.add_argument('-data_path', dest='data_path', type=str, required=True, help='Path to data list.')
+    parser.add_argument('-fold', dest='fold', type=int, default=None, help='Path to saved model.')
+    args = parser.parse_args()
+
+    fold = args.fold
+    path = args.data_path
 
 
     # ===============================================
@@ -349,16 +285,17 @@ if __name__ == "__main__":
 
     print("Loading data...")
 
-    X_train, Y_train = loadDataCP("./CameraPrimusFolds/Fold"+ str(fold) +"/train", 30000)
-    X_val, Y_val = loadDataCP("./CameraPrimusFolds/Fold"+ str(fold) +"/test", 10000)
-    X_test, Y_test = loadDataCP("./CameraPrimusFolds/Fold"+ str(fold) +"/validation", 10000)
+    X_train, Y_train = LoadCameraPrimus(path + "/train", 30000)
+    X_val, Y_val = LoadCameraPrimus(path + "/validation", 10000)
+    X_test, Y_test = LoadCameraPrimus(path + "/test", 10000)
 
-    w2i = np.load("./vocabulary/1/w2i.npy", allow_pickle=True).item()
-    i2w = np.load("./vocabulary/1/i2w.npy", allow_pickle=True).item()
+    w2i = {}
+    i2w = {}
 
+    Y_train, Y_test, Y_val, w2i, i2w, LENGTH = prepareOutput1(Y_train, Y_test, Y_val, i2w, w2i, "Printed/CTC", fold)
 
     vocabulary_size = len(w2i)
-
+    print(vocabulary_size)
     # ===============================================
     # CRNN
 
@@ -436,6 +373,8 @@ if __name__ == "__main__":
                     h = [ i2w[w] for w in sequence[i] ]
                     y = [ i2w[w] for w in Y_val[batch_idx+i] ]
 
+                    h = parseSequence(h)
+                    y = parseSequence(y)
                     #print("Y:",y) # ************
                     #print("H:",h) # ************
 
@@ -446,13 +385,13 @@ if __name__ == "__main__":
             print('Epoch',epoch,' - SER:', str(100. * acc_ed / acc_len), ' - From ',acc_count,'samples')
 
             if epoch % 5 == 0 and acc_ed < current_edition_val:
-                save_model_epoch = "./checkpoints/FOLD4/model"+'_'+str(epoch)
+                save_model_epoch = "./checkpoints/printed/CTC/modelenc1"+str(fold)
                 bestModel = save_model_epoch
                 print('-> Saving current model to ',save_model_epoch)
                 saver.save(sess, save_model_epoch)
 
-    saver = tf.train.import_meta_graph(bestModel+".meta")      
-    saver.restore(sess, bestModel)
+    saver = tf.train.import_meta_graph("./checkpoints/printed/CTC/modelenc1"+str(fold)+".meta")      
+    saver.restore(sess, "./checkpoints/printed/CTC/modelenc1"+str(fold))
 
     graph = tf.get_default_graph()
 
@@ -494,6 +433,9 @@ if __name__ == "__main__":
         for i in range(len(sequence)):
             h = [ i2w[w] for w in sequence[i] ]
             y = [ i2w[w] for w in Y_test[batch_idx+i] ]
+
+            h = parseSequence(h)
+            y = parseSequence(y)
 
             test_ed += edit_distance(h, y)
             test_len += len(y)

@@ -2,21 +2,20 @@
 import tqdm
 import numpy as np
 import os
+import sys
 
 import json
 
 # ==== CONSTANTS ====
 NUMFOLDS = 5
-TESTPERC = 0.15
-VALIDATIONPERC = 0.15
+TESTPERC = 0.2
+VALIDATIONPERC = 0.2
 # ===================
 
 
 def vector_to_file(filename, data):
     with open(filename, "w") as file:
-        for writedata in data:
-            file.write(writedata)
-            file.write("\n")
+        file.writelines(data)
     file.close()
 
 def loadData(path):
@@ -31,7 +30,7 @@ def loadData(path):
                     if "regions" in page:
                         for region in page['regions']:
                             if region['type'] == 'staff' and "symbols" in region:
-                                fileList.append(path+file)
+                                fileList.append(path+file + ' \n')
                                 valid = False
                                 break
                     if valid == True:

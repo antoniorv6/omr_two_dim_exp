@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import json
 
 ##Loads Camera Primus Dataset from a fold
 def LoadCameraPrimus(filepath, samples):
@@ -29,6 +30,38 @@ def LoadCameraPrimus(filepath, samples):
                 break
 
     return np.array(X), np.array(Y)
+
+def LoadHandWritten(filepath):
+    X = []
+    Y = []
+
+    with open(filepath, "r") as datafile:
+        line = datafile.readline()
+        while line:
+            fileToOpen = line.split(" ")[0]
+            with open(fileToOpen) as json_file:
+                data = json.load(json_file)
+                originalImage = cv2.imread("dataHandwritten/B-59.850/" + data['filename'], False)
+                for page in data['pages']:
+                    if "regions" in page:
+                        for region in page['regions']:
+                            if region['type'] == 'staff' and "symbols" in region:
+                                symbol_sequence = [( s["agnostic_symbol_type"] + "-" + s["position_in_straff"], s["bounding_box"]["fromX"]) for s in region["symbols"]]
+                                sorted_symbols = sorted(symbol_sequence, key=lambda symbol: symbol[1])
+                                sequence = [sym[0] for sym in sorted_symbols]
+                                Y.append(sequence)
+                                top, left, bottom, right = region["bounding_box"]["fromY"], \
+                                                           region["bounding_box"]["fromX"], \
+                                                           region["bounding_box"]["toY"], \
+                                                           region["bounding_box"]["toX"]
+                                selected_region = originalImage[top:bottom, left:right]
+                                if selected_region is not None:
+                                    X.append(selected_region)
+            line = datafile.readline()
+        datafile.close()
+
+    return np.array(X), np.array(Y)
+
 
 def edit_distance(a, b):
     n, m = len(a), len(b)

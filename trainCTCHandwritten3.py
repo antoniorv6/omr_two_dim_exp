@@ -9,6 +9,10 @@ import cv2
 import os
 import sys
 
+import argparse
+
+from utils.utils import LoadHandWritten, prepareOutput3, parseSequence
+
 # ===================================================
 os.environ["CUDA_VISIBLE_DEVICES"]="1"
 config = tf.ConfigProto()
@@ -112,71 +116,6 @@ def edit_distance(a,b,EOS=-1,PAD=-1):
     _b = [s for s in b if s != EOS and s != PAD]
 
     return levenshtein(_a,_b)
-
-
-def loadData(path):
-    X = []
-    Y = []
-
-    print('Loading data...')
-
-    for file in os.listdir(path):
-        if file.endswith(".json"):
-            with open(path + file) as json_file:
-                originalImage = cv2.imread(os.path.splitext(path+file)[0], False)
-                data = json.load(json_file)
-                for page in data['pages']:
-                    if "regions" in page:
-                        for region in page['regions']:
-                            if region['type'] == 'staff' and "symbols" in region:
-                                symbol_sequence = [( s["agnostic_symbol_type"] + "-" + s["position_in_straff"], s["bounding_box"]["fromX"]) for s in region["symbols"]]
-                                sorted_symbols = sorted(symbol_sequence, key=lambda symbol: symbol[1])
-                                sequence = [sym[0] for sym in sorted_symbols]
-                                Y.append(sequence)
-                                top, left, bottom, right = region["bounding_box"]["fromY"], \
-                                                           region["bounding_box"]["fromX"], \
-                                                           region["bounding_box"]["toY"], \
-                                                           region["bounding_box"]["toX"]
-                                selected_region = originalImage[top:bottom, left:right]
-                                if selected_region is not None:
-                                    X.append(selected_region)
-
-    print('Data loaded!')
-    return np.array(X), np.array(Y)
-
-def parseSequence(sequence):
-    
-    parsed = []
-    for char in sequence:
-        parsed += char.split("-")
-    return parsed
-
-def prepareVocabularyandOutput(trainY, testY, valY):
-    global w2i, i2w
-
-    Y_train = [parseSequence(sequence) for sequence in trainY]
-    Y_test = [parseSequence(sequence)  for sequence in testY]
-    Y_val = [parseSequence(sequence) for sequence in valY]
-    # Setting up the vocabulary with positions and symbols
-    vocabulary = set()
-
-    for sequence in Y_train:
-        vocabulary.update(sequence)
-    for sequence in Y_test:
-        vocabulary.update(sequence)
-    for sequence in Y_val:
-        vocabulary.update(sequence)
-
-    # print('We have a total of ' + str(len(vocabulary)) + ' symbols')
-
-    w2i = dict([(char, i+1) for i, char in enumerate(vocabulary)])
-    i2w = dict([(i+1, char) for i, char in enumerate(vocabulary)])
-
-    w2i['PAD'] = 0
-    i2w[0] = 'PAD'
-
-    return Y_train, Y_test, Y_val
-
 
 # ===================================================
 
@@ -333,51 +272,38 @@ def data_preparation(X, Y, w2i, params):
 if __name__ == "__main__":
 
     # ========
-    max_epochs = 1000
+    max_epochs = 300
     mini_batch_size = 16
     val_split = 0.2
     fixed_height = 64
-    fold = 1
     # ========
 
-    #parser = argparse.ArgumentParser(description='CRNN Training for HMR.')
-    #parser.add_argument('-data_list', dest='data', type=str, required=True, help='Path to data list.')
-    #parser.add_argument('-save_model', dest='save_model', type=str, default=None, help='Path to saved model.')
-    #parser.add_argument('-vocabulary', dest='vocabulary', type=str, required=True, help='Path to export the vocabulary.')
-    #args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='CRNN Training for HMR.')
+    parser.add_argument('-data_path', dest='data_path', type=str, required=True, help='Path to data list.')
+    parser.add_argument('-fold', dest='fold', type=int, default=None, help='Path to saved model.')
+    args = parser.parse_args()
 
+    fold = args.fold
+    path = args.data_path
 
     # ===============================================
     # Loading data
 
-    RawX, RawY = loadData("dataHandwritten/B-59.850/")
-    split = len(RawX)*val_split
-    splitIndex = int(split/2)
-    X_test = RawX[:splitIndex]
-    X_val = RawX[splitIndex:splitIndex*2]
-    X_train = RawX[splitIndex*2:]
-
-    Y_test = RawY[:splitIndex]
-    Y_val = RawY[splitIndex:splitIndex*2]
-    Y_train = RawY[splitIndex*2:]
+    X_train, Y_train = LoadHandWritten(path + "/train")
+    X_val, Y_val = LoadHandWritten(path + "/validation")
+    X_test, Y_test = LoadHandWritten(path + "/test")
 
     print(X_train.shape)
     print(X_val.shape)
     print(X_test.shape)
 
-    Y_train, Y_test, Y_val = prepareVocabularyandOutput(Y_train, Y_test, Y_val)
+    i2w = {}
+    w2i = {}
 
-    print(Y_train[0])
-    sys.exit(0)
-
-    #w2i = np.load("./vocabulary/1/w2i.npy", allow_pickle=True).item()
-    #i2w = np.load("./vocabulary/1/i2w.npy", allow_pickle=True).item()
-
-    save_vocabulary("./vocabulary/handwritten/CTC3/w2i.npy", w2i)
-    save_vocabulary("./vocabulary/handwritten/CTC3/i2w.npy", i2w)
-
+    Y_train, Y_test, Y_val ,w2i, i2w, ALPHABETLENGTH= prepareOutput3(Y_train, Y_test, Y_val, i2w, w2i, "Handwritten", fold)
 
     vocabulary_size = len(w2i)
+    print(vocabulary_size)
 
     # ===============================================
     # CRNN
@@ -467,14 +393,14 @@ if __name__ == "__main__":
             print('Epoch',epoch,' - SER:', str(SER), ' - From ',acc_count,'samples')
 
             if epoch % 5 == 0 and SER < current_edition_val:
-                save_model_epoch = "./checkpoints/handwritten/CTC/model3cod"
+                save_model_epoch = "./checkpoints/handwritten/CTC/modelenc3" + str(fold)
                 bestModel = save_model_epoch
                 current_edition_val = SER
                 print('-> Saving current model to ',save_model_epoch)
                 saver.save(sess, save_model_epoch)
 
-    saver = tf.train.import_meta_graph("./checkpoints/handwritten/CTC/model3cod.meta")      
-    saver.restore(sess, "./checkpoints/handwritten/CTC/model3cod")
+    saver = tf.train.import_meta_graph("./checkpoints/handwritten/CTC/modelenc3"+ str(fold) +".meta")      
+    saver.restore(sess, "./checkpoints/handwritten/CTC/modelenc3")
 
     graph = tf.get_default_graph()
 
@@ -514,4 +440,4 @@ if __name__ == "__main__":
             test_len += len(y)
             test_count += 1
 
-    print('Testing - SER:', str(100. * test_ed / test_len), ' - From ',test_count,'samples')
+    print('Testing in split-sequence encoding - SER in fold ' + str(fold) + ' :', str(100. * acc_ed / acc_len), ' - From ',acc_count,'samples')

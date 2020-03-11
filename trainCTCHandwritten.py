@@ -9,6 +9,8 @@ import cv2
 import os
 import sys
 
+from utils.utils import LoadHandWritten, prepareOutput1, parseSequence
+
 # ===================================================
 os.environ["CUDA_VISIBLE_DEVICES"]="1"
 config = tf.ConfigProto()
@@ -112,61 +114,6 @@ def edit_distance(a,b,EOS=-1,PAD=-1):
     _b = [s for s in b if s != EOS and s != PAD]
 
     return levenshtein(_a,_b)
-
-
-def loadData(path):
-    X = []
-    Y = []
-
-    print('Loading data...')
-
-    for file in os.listdir(path):
-        if file.endswith(".json"):
-            with open(path + file) as json_file:
-                originalImage = cv2.imread(os.path.splitext(path+file)[0], False)
-                data = json.load(json_file)
-                for page in data['pages']:
-                    if "regions" in page:
-                        for region in page['regions']:
-                            if region['type'] == 'staff' and "symbols" in region:
-                                symbol_sequence = [( s["agnostic_symbol_type"] + "-" + s["position_in_straff"], s["bounding_box"]["fromX"]) for s in region["symbols"]]
-                                sorted_symbols = sorted(symbol_sequence, key=lambda symbol: symbol[1])
-                                sequence = [sym[0] for sym in sorted_symbols]
-                                Y.append(sequence)
-                                top, left, bottom, right = region["bounding_box"]["fromY"], \
-                                                           region["bounding_box"]["fromX"], \
-                                                           region["bounding_box"]["toY"], \
-                                                           region["bounding_box"]["toX"]
-                                selected_region = originalImage[top:bottom, left:right]
-                                if selected_region is not None:
-                                    X.append(selected_region)
-
-    print('Data loaded!')
-    return np.array(X), np.array(Y)
-
-def prepareVocabularyandOutput(trainY, testY, valY):
-    global w2i, i2w
-
-    # Setting up the vocabulary with positions and symbols
-    vocabulary = set()
-
-    for sequence in Y_train:
-        vocabulary.update(sequence)
-    for sequence in Y_test:
-        vocabulary.update(sequence)
-    for sequence in Y_val:
-        vocabulary.update(sequence)
-
-    # print('We have a total of ' + str(len(vocabulary)) + ' symbols')
-
-    w2i = dict([(char, i+1) for i, char in enumerate(vocabulary)])
-    i2w = dict([(i+1, char) for i, char in enumerate(vocabulary)])
-
-    w2i['PAD'] = 0
-    i2w[0] = 'PAD'
-
-    return
-
 
 # ===================================================
 
@@ -320,89 +267,58 @@ def data_preparation(X, Y, w2i, params):
 #
 # ==============================================================
 
-def parseSequence(sequence):
-    
-    parsed = []
-    for char in sequence:
-        parsed += char.split("-")
-    return parsed
-
 if __name__ == "__main__":
 
     # ========
-    max_epochs = 1000
+    max_epochs = 300
     mini_batch_size = 16
     val_split = 0.2
     fixed_height = 64
-    fold = 1
     # ========
 
-    #parser = argparse.ArgumentParser(description='CRNN Training for HMR.')
-    #parser.add_argument('-data_list', dest='data', type=str, required=True, help='Path to data list.')
-    #parser.add_argument('-save_model', dest='save_model', type=str, default=None, help='Path to saved model.')
-    #parser.add_argument('-vocabulary', dest='vocabulary', type=str, required=True, help='Path to export the vocabulary.')
-    #args = parser.parse_args()
+    parser = argparse.ArgumentParser(description='CRNN Training for HMR.')
+    parser.add_argument('-data_path', dest='data_path', type=str, required=True, help='Path to data list.')
+    parser.add_argument('-fold', dest='fold', type=int, default=None, help='Path to saved model.')
+    args = parser.parse_args()
 
+    fold = args.fold
+    path = args.data_path
 
     # ===============================================
     # Loading data
-
-    RawX, RawY = loadData("dataHandwritten/B-59.850/")
-    split = len(RawX)*val_split
-    splitIndex = int(split/2)
-    X_test = RawX[:splitIndex]
-    X_val = RawX[splitIndex:splitIndex*2]
-    X_train = RawX[splitIndex*2:]
-
-    Y_test = RawY[:splitIndex]
-    Y_val = RawY[splitIndex:splitIndex*2]
-    Y_train = RawY[splitIndex*2:]
-
+    X_train, Y_train = LoadHandWritten(path + "/train")
+    X_val, Y_val = LoadHandWritten(path + "/validation")
+    X_test, Y_test = LoadHandWritten(path + "/test")
     print(X_train.shape)
     print(X_val.shape)
     print(X_test.shape)
-
-    prepareVocabularyandOutput(Y_train, Y_test, Y_val)
-
-    #w2i = np.load("./vocabulary/1/w2i.npy", allow_pickle=True).item()
-    #i2w = np.load("./vocabulary/1/i2w.npy", allow_pickle=True).item()
-
-    save_vocabulary("./vocabulary/handwritten/CTC3/w2is.npy", w2i)
-    save_vocabulary("./vocabulary/handwritten/CTC3/i2ws.npy", i2w)
-
+    i2w = {}
+    w2i = {}
+    
+    Y_Train, Y_Test, Y_Validate, w2i, i2w, ALPHABETLENGTH = prepareOutput1(Y_train, Y_test, Y_val, i2w, w2i, "Handwritten", fold)
     vocabulary_size = len(w2i)
-
+    print(vocabulary_size)
     # ===============================================
     # CRNN
-
     params = default_model_params(fixed_height, vocabulary_size)
-
     crnn_placeholders = crnn(params)
     optimizer = tf.train.AdamOptimizer().minimize(crnn_placeholders['loss'])
     decoder, log_prob = tf.nn.ctc_greedy_decoder(crnn_placeholders['logits'], crnn_placeholders['seq_len'])
-
-
     # ===============================================
     # Data preparation
     X_train, Y_train = data_preparation(X_train, Y_train, w2i, params)
     L_train = [image.shape[1] // crnn_placeholders['width_reduction'] for image in X_train]
     X_train = build_batch(X_train, channels = 1)
-
     X_val, Y_val = data_preparation(X_val, Y_val, w2i, params)
     L_val = [image.shape[1] // crnn_placeholders['width_reduction'] for image in X_val]
     X_val = build_batch(X_val, channels = 1)
-
     # ===============================================
     # Training
-
     print(X_train.shape)
-
     print('Training with ' + str(X_train.shape[0]) + ' samples.')
     print('Validating with ' + str(X_val.shape[0]) + ' samples.')
-
     saver = tf.train.Saver(max_to_keep=None)
     sess.run(tf.global_variables_initializer())
-
     bestModel = ""
     current_edition_val = 10000
     for epoch in range(max_epochs):
@@ -412,12 +328,10 @@ if __name__ == "__main__":
             X_train_batch = X_train[batch_idx:batch_idx + mini_batch_size]
             L_train_batch = L_train[batch_idx:batch_idx + mini_batch_size]
             Y_train_batch = Y_train[batch_idx:batch_idx + mini_batch_size]
-
             # Deal with empty staff sections
             for idx, _ in enumerate(X_train_batch):
                 if len(Y_train_batch[idx]) == 0:
                     Y_train_batch[idx] = [vocabulary_size]  # Blank CTC
-
             update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
             with tf.control_dependencies(update_ops):
                 _ = sess.run(optimizer,
@@ -428,14 +342,11 @@ if __name__ == "__main__":
                                  crnn_placeholders['keep_prob']: 0.5
                              }
                             )
-
-
         # Validation
         if epoch % 5 == 0:
             acc_ed = 0
             acc_count = 0
             acc_len = 0
-
             for batch_idx in range(0, X_val.shape[0], mini_batch_size):  
                 pred = sess.run(decoder,
                                 {
@@ -448,50 +359,38 @@ if __name__ == "__main__":
                 for i in range(len(sequence)):
                     h = [ i2w[w] for w in sequence[i] ]
                     y = [ i2w[w] for w in Y_val[batch_idx+i] ]
-
                     #print("Y:",y) # ************
                     #print("H:",h) # ************
                     h = parseSequence(h);
                     y = parseSequence(y);
-
                     acc_ed += edit_distance(h, y)
                     acc_len += len(y)
                     acc_count += 1
-
             SER = 100 * acc_ed / acc_len
             print('Epoch',epoch,' - SER:', str(SER), ' - From ',acc_count,'samples')
-
             if epoch % 5 == 0 and SER < current_edition_val:
-                save_model_epoch = "./checkpoints/handwritten/CTC/model"
+                save_model_epoch = "./checkpoints/handwritten/CTC/modelenc1"+str(fold)
                 bestModel = save_model_epoch
                 current_edition_val = SER
                 print('-> Saving current model to ',save_model_epoch)
                 saver.save(sess, save_model_epoch)
-
-    saver = tf.train.import_meta_graph("./checkpoints/handwritten/CTC/model"+".meta")      
+    saver = tf.train.import_meta_graph("./checkpoints/handwritten/CTC/modelenc1"+ str(fold) +".meta")      
     saver.restore(sess, bestModel)
-
     graph = tf.get_default_graph()
-
     input = graph.get_tensor_by_name("model_input:0")
     seq_len = graph.get_tensor_by_name("seq_lengths:0")
     rnn_keep_prob = graph.get_tensor_by_name("keep_prob:0")
     height_tensor = graph.get_tensor_by_name("input_height:0")
     width_reduction_tensor = graph.get_tensor_by_name("width_reduction:0")
     logits = tf.get_collection("logits")[0]
-
     decoded, _ = tf.nn.ctc_greedy_decoder(logits, seq_len)
-
     test_ed = 0
     test_count = 0
     test_len = 0
-
     X_test, Y_test = data_preparation(X_test, Y_test, w2i, params)
     L_test = [image.shape[1] // crnn_placeholders['width_reduction'] for image in X_test]
     X_test = build_batch(X_test, channels = 1)
-
     for batch_idx in range(0, X_test.shape[0], mini_batch_size):
-
         pred = sess.run(decoded,
                 {
                     input: X_test[batch_idx:batch_idx + mini_batch_size],
@@ -499,17 +398,13 @@ if __name__ == "__main__":
                     rnn_keep_prob: 1
                 }
                 )
-
         sequence = sparse_tensor_to_strs(pred)
         for i in range(len(sequence)):
             h = [ i2w[w] for w in sequence[i] ]
             y = [ i2w[w] for w in Y_test[batch_idx+i] ]
-            
             h = parseSequence(h);
             y = parseSequence(y);
-
             test_ed += edit_distance(h, y)
             test_len += len(y)
             test_count += 1
-
-    print('Testing - SER:', str(100. * acc_ed / acc_len), ' - From ',acc_count,'samples')
+    print('Testing in standard encoding - SER in fold ' + str(fold) + ' :', str(100. * acc_ed / acc_len), ' - From ',acc_count,'samples')
