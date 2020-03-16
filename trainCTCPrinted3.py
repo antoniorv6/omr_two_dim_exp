@@ -266,7 +266,7 @@ def data_preparation(X, Y, w2i, params):
 if __name__ == "__main__":
 
     # ========
-    max_epochs = 100
+    max_epochs = 200
     mini_batch_size = 16
     val_split = 0.1
     fixed_height = 64
@@ -287,7 +287,7 @@ if __name__ == "__main__":
 
     print("Loading data...")
 
-    X_train, Y_train = LoadCameraPrimus(path + "/train", 30000)
+    X_train, Y_train = LoadCameraPrimus(path + "/train", 20000)
     X_val, Y_val = LoadCameraPrimus(path + "/validation", 10000)
     X_test, Y_test = LoadCameraPrimus(path + "/test", 10000)
 
@@ -440,4 +440,4 @@ if __name__ == "__main__":
             test_len += len(y)
             test_count += 1
 
-    print('Testing - SER:', str(100. * acc_ed / acc_len), ' - From ',acc_count,'samples')
+    print('Testing CTC Printed split-sequence - SER in fold '+ str(fold) + ' :', str(100. * acc_ed / acc_len), ' - From ',acc_count,'samples')

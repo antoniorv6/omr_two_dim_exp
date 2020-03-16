@@ -400,7 +400,7 @@ if __name__ == "__main__":
                 saver.save(sess, save_model_epoch)
 
     saver = tf.train.import_meta_graph("./checkpoints/handwritten/CTC/modelenc3"+ str(fold) +".meta")      
-    saver.restore(sess, "./checkpoints/handwritten/CTC/modelenc3")
+    saver.restore(sess, "./checkpoints/handwritten/CTC/modelenc3" + str(fold))
 
     graph = tf.get_default_graph()
 
