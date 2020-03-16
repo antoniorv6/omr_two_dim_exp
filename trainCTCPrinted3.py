@@ -266,7 +266,7 @@ def data_preparation(X, Y, w2i, params):
 if __name__ == "__main__":
 
     # ========
-    max_epochs = 200
+    max_epochs = 50
     mini_batch_size = 16
     val_split = 0.1
     fixed_height = 64

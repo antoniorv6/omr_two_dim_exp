@@ -17,10 +17,7 @@ declare -i foldhw=1
 declare -i fold=1
 declare -i foldss=1
 
-for NAME in ${PATHSHW}; do
-    python -u trainCTCHandwritten3.py -data_path=${NAME} -fold=${foldhw}
-    foldhw=$((foldhw + 1))
-done
+python -u trainCTCHandwritten3.py -data_path="HandwrittenFolds/Fold4" -fold=4
 
 for NAME in ${PATHS}; do
     python -u trainCTCPrinted.py -data_path=${NAME} -fold=${fold}
